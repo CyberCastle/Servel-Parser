@@ -8,12 +8,13 @@ class TableFilter(TokenFilter):
     que hay en los PDFs del SERVEL (Nombre, RUT, Sexo, Dirección, etc.).
     """
 
-    def __init__(self):
+    def __init__(self, columnSize=7):
         super().__init__()
         self.is_f2_name_token_type = False
         self.table = []
         self.rows = []
         self.cntColumns = 0
+        self.columnSize = columnSize
 
     def handle_token(self, token):
         """
@@ -88,7 +89,7 @@ class TableFilter(TokenFilter):
 
                 self.rows.append(text)
                 self.cntColumns += 1
-                if self.cntColumns >= 7:
+                if self.cntColumns >= self.columnSize:
                     self.table.append(self.rows)
                     self.rows = []
                     self.cntColumns = 0
