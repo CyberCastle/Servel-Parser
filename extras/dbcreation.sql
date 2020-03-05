@@ -1,0 +1,3 @@
+CREATE USER servel PASSWORD 'servel';
+DROP DATABASE IF EXISTS servel;
+CREATE DATABASE servel OWNER servel;

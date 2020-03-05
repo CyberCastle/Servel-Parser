@@ -10,6 +10,12 @@ import pikepdf
 import psutil
 import ray
 import pandas as pd
+from sqlalchemy import create_engine
+from sqlalchemy import Table, Column, String, Integer, MetaData
+from sqlalchemy.dialects.postgresql import insert
+
+# Global variables
+DB_STRING = "postgres://servel:servel@localhost:5432/servel"
 
 # Project dependencies
 from tablefilter import TableFilter
@@ -46,11 +52,51 @@ class DataTableHandler:
         self._df.to_csv(filePath, sep=";", index=False)
         pass
 
+    def save_to_db(self, db_string):
+
+        # Definiciones para crear una conexión hacia la DB
+        db = create_engine(db_string)
+        meta = MetaData()
+        meta.reflect(bind=db)
+
+        # Se seleccionan sólo las columnas que serán guardadas
+        selected_columns = [
+            "Nombre",
+            "RUN",
+            "Sexo",
+            "Domicilio",
+            "Id Comuna",
+        ]
+        df = self._df[selected_columns]
+
+        # Renombramos las columnas del dataframe, para que se igualen a
+        # los nombres usados en la tabla "Votantes"
+        df = df.rename(
+            columns={
+                "Nombre": "nombre",
+                "RUN": "rut",
+                "Sexo": "sexo",
+                "Domicilio": "domicilio",
+                "Id Comuna": "comuna_id",
+            }
+        )
+
+        # Se prepara la sentencia SQL para insertar los registros en la tabla
+        stmt = insert(meta.tables["votantes"]).values(df.to_dict(orient="records"))
+        on_conflict_stmt = stmt.on_conflict_do_nothing(
+            index_elements=["rut"]
+        )  # Exclusive for PostgreSQL (UPSERT)
+
+        # Se abre la conexiós, se ejecuta la sentencia y luego se cierra la conexión
+        with db.connect() as conn:
+            conn.execute(on_conflict_stmt)
+            conn.close()
+
 
 @ray.remote
-def process_page(page, columnSize, data_table):
+def process_page(page, columnSize, commune_id, data_table):
 
-    filter = TableFilter(columnSize)
+    filter = TableFilter(columnSize, commune_id)
     pdf = pikepdf.open(page)
     page = pikepdf.Page(pdf.pages[0])
     page.get_filtered_contents(filter)
@@ -58,13 +104,20 @@ def process_page(page, columnSize, data_table):
     return True
 
 
-def process_file(inPath, columnNames):
-    outPath = inPath.replace(".pdf", ".csv")
-    pdf = pikepdf.open(inPath)
+def process_file(inPath, outPath, fileName, columnSize, columnNames):
+    fileIn = path.join(inPath, fileName)
+    fileOut = path.join(outPath, fileName.replace(".pdf", ".csv"))
+
+    # Se obtiene un id para la comuna a partir del nombre del archivo, el
+    # cual está basado en el Código Único Territorial, definido por el INE.
+    # Más info aquí: http://www.subdere.cl/sites/default/files/documentos/articles-73111_recurso_2.pdf
+    commune_id = fileName.translate(
+        str.maketrans({"A": "", ".": "", "p": "", "d": "", "f": ""})
+    )
+    pdf = pikepdf.open(fileIn)
     pages = pdf.pages
-    fileName = path.split(inPath)[1]
+
     print(f"Número de Páginas del archivo {fileName}: {len(pages)}")
-    columnSize = len(columnNames)
     data_table_handler_actor = DataTableHandler.remote(columnNames)
 
     remote_proccess_ids = []
@@ -75,7 +128,9 @@ def process_file(inPath, columnNames):
         newPdf = pikepdf.Pdf.new()
         newPdf.pages.append(pageObj)
         newPdf.save(tmpFile)
-        id = process_page.remote(tmpFile, columnSize, data_table_handler_actor)
+        id = process_page.remote(
+            tmpFile, columnSize, commune_id, data_table_handler_actor
+        )
         remote_proccess_ids.append(id)
         tmpFile.flush()
         tmpFile.close()
@@ -88,12 +143,37 @@ def process_file(inPath, columnNames):
     print(f"Número de registros leídos del archivo {fileName}: {df.shape[0]}")
 
     # Generate CSV
-    ray.get(data_table_handler_actor.generate_csv.remote(outPath))
+    # ray.get(data_table_handler_actor.generate_csv.remote(fileOut))
+
+    # Save registers into database
+    ray.get(data_table_handler_actor.save_to_db.remote(DB_STRING))
+
+
+def database_settings(db_string):
+    db = create_engine(db_string)
+    meta = MetaData(db)
+    voter_table = Table(
+        "votantes",
+        meta,
+        Column("rut", String, primary_key=True, nullable=False),
+        Column("nombre", String, nullable=False),
+        Column("sexo", String),
+        Column("domicilio", String),
+        Column("comuna_id", String),
+    )
+
+    with db.connect() as conn:
+        voter_table.create(checkfirst=True)
+        conn.close()
 
 
 # Main method
 def main():
-    servel_files_dir = "/Users/cybercastle/tmp/files"
+
+    database_settings(DB_STRING)
+
+    servel_files_in = "/Users/cybercastle/tmp/filesIn"
+    servel_files_out = "/Users/cybercastle/tmp/filesOut"
     columnNames = [
         "Nombre",
         "RUN",
@@ -102,12 +182,23 @@ def main():
         "Circunscripción",
         "Mesa Nº",
         "",
+        "Id Comuna",
     ]
+    columnSize = len(columnNames) - 1
 
-    for filename in listdir(servel_files_dir):
-        filepath = path.join(servel_files_dir, filename)
-        process_file(filepath, columnNames)
+    """
+    for filename in listdir(servel_files_in):
+        process_file(
+            servel_files_in, servel_files_out, filename, columnSize, columnNames
+        )
         pass
+
+    """
+
+    fileNameDemo = "A13201.pdf"
+    process_file(
+        servel_files_in, servel_files_out, fileNameDemo, columnSize, columnNames
+    )
 
 
 # Run the main method

@@ -8,13 +8,14 @@ class TableFilter(TokenFilter):
     que hay en los PDFs del SERVEL (Nombre, RUT, Sexo, Dirección, etc.).
     """
 
-    def __init__(self, columnSize=7):
+    def __init__(self, columnSize=7, commune_id=-1):
         super().__init__()
         self.is_f2_name_token_type = False
         self.table = []
         self.rows = []
         self.cntColumns = 0
         self.columnSize = columnSize
+        self.commune_id = commune_id
 
     def handle_token(self, token):
         """
@@ -90,6 +91,8 @@ class TableFilter(TokenFilter):
                 self.rows.append(text)
                 self.cntColumns += 1
                 if self.cntColumns >= self.columnSize:
+                    # Se añade la comuna como una columna más
+                    self.rows.append(self.commune_id)
                     self.table.append(self.rows)
                     self.rows = []
                     self.cntColumns = 0
