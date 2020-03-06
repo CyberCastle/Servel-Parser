@@ -5,6 +5,11 @@
 from io import BytesIO
 from os import path, listdir
 
+# Date and Time dependencies
+import datetime
+import time
+import pytz
+
 # External libraries
 import pikepdf
 import psutil
@@ -170,6 +175,12 @@ def database_settings(db_string):
 # Main method
 def main():
 
+    clTimezone = pytz.timezone("America/Santiago")
+    now = datetime.datetime.now(clTimezone)
+
+    print(f'Initialized process at {now.strftime("%Y-%m-%d %H:%M:%S")}.')
+    start_time = time.time()
+
     database_settings(DB_STRING)
 
     servel_files_in = "/Users/cybercastle/tmp/filesIn"
@@ -198,6 +209,11 @@ def main():
     fileNameDemo = "A13201.pdf"
     process_file(
         servel_files_in, servel_files_out, fileNameDemo, columnSize, columnNames
+    )
+
+    elapsed_time = time.time() - start_time
+    print(
+        f'Process finalized. Time elapsed: {time.strftime("%H:%M:%S", time.gmtime(elapsed_time))}.'
     )
 
 
